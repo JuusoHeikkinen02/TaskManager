@@ -122,7 +122,7 @@ namespace ReactWithASP.Server.Controllers
         [HttpPut]
         [Route("AddTask")]
 
-        public JsonResult AddTask(string Name, string Description, DateTime StartDate, DateTime EndDate, string TagName, string TagTheme, string StatusName, string StatusTheme)
+        public JsonResult AddTask(string Name, string? Description, DateTime StartDate, DateTime EndDate, string TagName, string TagTheme, string StatusName, string StatusTheme)
         {
             DataTable table = new DataTable();
             string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
@@ -141,7 +141,7 @@ namespace ReactWithASP.Server.Controllers
                 using (SqlCommand MyCommand = new SqlCommand(insertQuery, myCon))
                 {
                     MyCommand.Parameters.AddWithValue("@Name", Name);
-                    MyCommand.Parameters.AddWithValue("@Description", Description);
+                    MyCommand.Parameters.AddWithValue("@Description", Description ?? DBNull.Value.ToString());
                     MyCommand.Parameters.AddWithValue("@StartDate", StartDate);
                     MyCommand.Parameters.AddWithValue("@EndDate", EndDate);
                     MyCommand.Parameters.AddWithValue("@TagId", TagId);
@@ -157,32 +157,74 @@ namespace ReactWithASP.Server.Controllers
 
         }
 
-        //täällä saadaan Tägi luotua samalla kun tehdään uusi Task tai Activity
-        private int InsertTag(string TagName, string TagTheme)
+        //Funktiolla voidaan lisätä uusi aktiviteetti 
+        [HttpPut]
+        [Route("AddActivity")]
+
+        public JsonResult AddActivity(string Name, string? Description,string? Url, DateTime StartDate, DateTime EndDate, string TagName, string TagTheme, string StatusName, string StatusTheme, string ActivityName)
         {
-          
-            string insertTagQuery = "IF NOT EXISTS (SELECT 1 FROM Tag WHERE Name = @TagName) " +
-                                    "BEGIN " +
-                                    "    INSERT INTO Tag (Name, Theme) VALUES (@TagName, @TagTheme) " +
-                                    "END " +
-                                    "SELECT Id FROM Tag WHERE Name = @TagName";
-            
+            DataTable table = new DataTable();
             string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
-            
+            SqlDataReader myReader;
             using (SqlConnection myCon = new SqlConnection(sqlDatasource))
             {
                 myCon.Open();
-                using (SqlCommand myCommand = new SqlCommand(insertTagQuery, myCon))
+                //Luodaan samalla muiden pöytien data
+                int TagId = InsertTag(TagName, TagTheme);
+
+                int statusId = InsertStatus(StatusName, StatusTheme);
+
+                int ActivityTypeId = InsertActivityType(ActivityName);
+
+                string insertQuery = "INSERT INTO Activity (Name, Description, Url, StartDate, EndDate, TagId, StatusId, ActivityTypeId) " +
+                                "VALUES (@Name, @Description, @Url, @StartDate, @EndDate, @TagId, @StatusId, @ActivityTypeId)";
+
+
+                using (SqlCommand MyCommand = new SqlCommand(insertQuery, myCon))
                 {
-                    myCommand.Parameters.AddWithValue("@TagName", TagName);
-                    myCommand.Parameters.AddWithValue("@TagTheme", TagTheme);
-                    myCommand.ExecuteNonQuery();
-                    int TagId = (int)myCommand.ExecuteScalar();
+                    MyCommand.Parameters.AddWithValue("@Name", Name);
+                    MyCommand.Parameters.AddWithValue("@Description", Description ?? DBNull.Value.ToString());
+                    MyCommand.Parameters.AddWithValue("@Url", Url ?? DBNull.Value.ToString());
+                    MyCommand.Parameters.AddWithValue("@StartDate", StartDate);
+                    MyCommand.Parameters.AddWithValue("@EndDate", EndDate);
+                    MyCommand.Parameters.AddWithValue("@TagId", TagId);
+                    MyCommand.Parameters.AddWithValue("@StatusId", statusId);
+                    MyCommand.Parameters.AddWithValue("@ActivityTypeId", ActivityTypeId);
+                    myReader = MyCommand.ExecuteReader();
+                    table.Load(myReader);
+                    myReader.Close();
                     myCon.Close();
-                    return TagId;
                 }
             }
-            
+            return new JsonResult("Lisäys onnistui");
+
+
+        }
+
+        //Tällä saadaan lisättyä aktiviteettityyppi kun tehdään uutta aktiviteettiä
+        private int InsertActivityType(string ActivityName)
+        {
+            string insertStatusQuery = "IF NOT EXISTS (SELECT 1 FROM ActivityType WHERE Name = @ActivityName) " +
+                                       "BEGIN " +
+                                       "    INSERT INTO ActivityType (Name) VALUES (@ActivityName) " +
+                                       "END " +
+                                       "SELECT Id FROM ActivityType WHERE Name = @ActivityName";
+
+            string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
+
+            using (SqlConnection myCon = new SqlConnection(sqlDatasource))
+            {
+                myCon.Open();
+                using (SqlCommand myCommand = new SqlCommand(insertStatusQuery, myCon))
+                {
+                    myCommand.Parameters.AddWithValue("@ActivityName", ActivityName);
+                    myCommand.ExecuteNonQuery();
+                    int ActivityTypeId = (int)myCommand.ExecuteScalar();
+                    myCon.Close();
+                    return ActivityTypeId;
+                }
+            }
+
         }
 
         //täällä saadaan status luotua samalla kun tehdään uusi Task tai Activity
@@ -211,6 +253,34 @@ namespace ReactWithASP.Server.Controllers
                 }
             }
             
+        }
+
+        //täällä saadaan Tägi luotua samalla kun tehdään uusi Task tai Activity
+        private int InsertTag(string TagName, string TagTheme)
+        {
+
+            string insertTagQuery = "IF NOT EXISTS (SELECT 1 FROM Tag WHERE Name = @TagName) " +
+                                    "BEGIN " +
+                                    "    INSERT INTO Tag (Name, Theme) VALUES (@TagName, @TagTheme) " +
+                                    "END " +
+                                    "SELECT Id FROM Tag WHERE Name = @TagName";
+
+            string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
+
+            using (SqlConnection myCon = new SqlConnection(sqlDatasource))
+            {
+                myCon.Open();
+                using (SqlCommand myCommand = new SqlCommand(insertTagQuery, myCon))
+                {
+                    myCommand.Parameters.AddWithValue("@TagName", TagName);
+                    myCommand.Parameters.AddWithValue("@TagTheme", TagTheme);
+                    myCommand.ExecuteNonQuery();
+                    int TagId = (int)myCommand.ExecuteScalar();
+                    myCon.Close();
+                    return TagId;
+                }
+            }
+
         }
 
         //Funktio jolla voidaan poistaa tehtävä ja sen pitäisi samalla poistaa status ja tagi 
@@ -267,6 +337,63 @@ namespace ReactWithASP.Server.Controllers
             return new JsonResult("Poistettu onnistuneesti");
         }
 
+        //Funktio jolla voidaan poistaa tehtävä ja sen pitäisi samalla poistaa status, tagi ja aktiviteettiTyyppi 
+        [HttpDelete]
+        [Route("DeleteActivity")]
+
+        public JsonResult DeleteActivity(int Id)
+        {
+            DataTable table = new DataTable();
+            string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
+
+            using (SqlConnection myCon = new SqlConnection(sqlDatasource))
+            {
+                myCon.Open();
+
+                //Hankitaan tehtävän avulla näille arvot jotta ne voidaan myös poistaa
+                int TagId;
+                int StatusId;
+                int ActivityTypeId;
+
+                string getIdsQuery = "SELECT TagId, StatusId, ActivityTypeId FROM Activity WHERE Id = @Id";
+                using (SqlCommand MyCommand = new SqlCommand(getIdsQuery, myCon))
+                {
+                    MyCommand.Parameters.AddWithValue("@Id", Id);
+
+                    using (SqlDataReader reader = MyCommand.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            TagId = reader.GetInt32(0);
+                            StatusId = reader.GetInt32(1);
+                            ActivityTypeId = reader.GetInt32(2);
+                        }
+                        else
+                        {
+                            // Aktiviteettiä ei löydy
+                            return new JsonResult("Aktiviteettiä ei löytynyt");
+                        }
+                    }
+                }
+                // Tehtävän poisto
+                string deleteTaskQuery = "DELETE FROM Activity WHERE Id = @Id";
+                using (SqlCommand MyCommand = new SqlCommand(deleteTaskQuery, myCon))
+                {
+                    MyCommand.Parameters.AddWithValue("@Id", Id);
+                    MyCommand.ExecuteNonQuery();
+
+                }
+                //Lopuksi poistetaan tag,status ja akTyyppi joka oli yhdessä aktiviteetin kanssa
+                DeleteTag(TagId);
+                DeleteStatus(StatusId);
+                DeleteActivityType(ActivityTypeId);
+
+                myCon.Close();
+
+            }
+            return new JsonResult("Poistettu onnistuneesti");
+        }
+
         //Komento jolla poistetaan tägi samalla kun tehtävä poistuu
         private void DeleteTag(int Id)
         {
@@ -295,6 +422,26 @@ namespace ReactWithASP.Server.Controllers
             {
                 myCon.Open();
                 using (SqlCommand deleteCommand = new SqlCommand(deleteStatusQuery, myCon))
+                {
+
+                    deleteCommand.Parameters.AddWithValue("@Id", Id);
+                    deleteCommand.ExecuteNonQuery();
+                    myCon.Close();
+
+                }
+            }
+
+        }
+
+        //Komento jolla poistetaan AktiviteettiTyyppi samalla kun Aktiviteetti poistuu
+        private void DeleteActivityType(int Id)
+        {
+            string deleteActivityTypeQuery = "DELETE FROM dbo.ActivityType WHERE Id = @Id";
+            string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
+            using (SqlConnection myCon = new SqlConnection(sqlDatasource))
+            {
+                myCon.Open();
+                using (SqlCommand deleteCommand = new SqlCommand(deleteActivityTypeQuery, myCon))
                 {
 
                     deleteCommand.Parameters.AddWithValue("@Id", Id);
