@@ -3,6 +3,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using System.Data;
 using System.Net.NetworkInformation;
+using System.Reflection.PortableExecutable;
 using System.Threading.Tasks;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 
@@ -122,7 +123,7 @@ namespace ReactWithASP.Server.Controllers
         [HttpPut]
         [Route("AddTask")]
 
-        public JsonResult AddTask(string Name, string? Description, DateTime StartDate, DateTime EndDate, string TagName, string TagTheme, string StatusName, string StatusTheme)
+        public JsonResult AddTask(string Name, string? Description, DateTime StartDate, DateTime EndDate, string TagName, string TagTheme, string StatusName, string StatusTheme, string ActivityName)
         {
             DataTable table = new DataTable();
             string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
@@ -134,8 +135,10 @@ namespace ReactWithASP.Server.Controllers
 
                 int statusId = InsertStatus(StatusName, StatusTheme);
 
-                string insertQuery = "INSERT INTO Task (Name, Description, StartDate, EndDate, TagId, StatusId) " +
-                                "VALUES (@Name, @Description, @StartDate, @EndDate, @TagId, @StatusId)";
+                int ActivityTypeId = InsertActivityType(ActivityName);
+
+                string insertQuery = "INSERT INTO Task (Name, Description, StartDate, EndDate, TagId, StatusId, ActivityTypeId) " +
+                                "VALUES (@Name, @Description, @StartDate, @EndDate, @TagId, @StatusId, @ActivityTypeId)";
 
 
                 using (SqlCommand MyCommand = new SqlCommand(insertQuery, myCon))
@@ -146,6 +149,7 @@ namespace ReactWithASP.Server.Controllers
                     MyCommand.Parameters.AddWithValue("@EndDate", EndDate);
                     MyCommand.Parameters.AddWithValue("@TagId", TagId);
                     MyCommand.Parameters.AddWithValue("@StatusId", statusId);
+                    MyCommand.Parameters.AddWithValue("@ActivityTypeId", ActivityTypeId);
                     myReader = MyCommand.ExecuteReader();
                     table.Load(myReader);
                     myReader.Close();
@@ -299,8 +303,9 @@ namespace ReactWithASP.Server.Controllers
                 //Hankitaan tehtävän avulla näille arvot jotta ne voidaan myös poistaa
                 int TagId;
                 int StatusId;
+                int ActivityTypeId;
 
-                string getIdsQuery = "SELECT TagId, StatusId FROM Task WHERE Id = @Id";
+                string getIdsQuery = "SELECT TagId, StatusId, ActivityTypeId FROM Task WHERE Id = @Id";
                 using (SqlCommand MyCommand = new SqlCommand(getIdsQuery, myCon))
                 {
                     MyCommand.Parameters.AddWithValue("@Id", Id);
@@ -311,6 +316,7 @@ namespace ReactWithASP.Server.Controllers
                         {
                             TagId = reader.GetInt32(0);
                             StatusId = reader.GetInt32(1);
+                            ActivityTypeId = reader.GetInt32(2);
                         }
                         else
                         {
@@ -327,14 +333,15 @@ namespace ReactWithASP.Server.Controllers
                     MyCommand.ExecuteNonQuery();
                     
                 }
-                //Lopuksi poistetaan tag ja status joka oli yhdessä tehtävän kanssa
+                //Lopuksi poistetaan tag, status ja akTyyppi joka oli yhdessä tehtävän kanssa
                 DeleteTag(TagId);
                 DeleteStatus(StatusId);
+                DeleteActivityType(ActivityTypeId);
 
                 myCon.Close();
 
             }
-            return new JsonResult("Poistettu onnistuneesti");
+            return new JsonResult(" Tehtävä poistettu onnistuneesti");
         }
 
         //Funktio jolla voidaan poistaa tehtävä ja sen pitäisi samalla poistaa status, tagi ja aktiviteettiTyyppi 
@@ -375,6 +382,7 @@ namespace ReactWithASP.Server.Controllers
                         }
                     }
                 }
+              
                 // Tehtävän poisto
                 string deleteTaskQuery = "DELETE FROM Activity WHERE Id = @Id";
                 using (SqlCommand MyCommand = new SqlCommand(deleteTaskQuery, myCon))
@@ -383,15 +391,16 @@ namespace ReactWithASP.Server.Controllers
                     MyCommand.ExecuteNonQuery();
 
                 }
-                //Lopuksi poistetaan tag,status ja akTyyppi joka oli yhdessä aktiviteetin kanssa
+                //lopuksi poistetaan tag,status ja akTyyppi joka oli yhdessä aktiviteetin kanssa
                 DeleteTag(TagId);
                 DeleteStatus(StatusId);
                 DeleteActivityType(ActivityTypeId);
 
-                myCon.Close();
+
+                
 
             }
-            return new JsonResult("Poistettu onnistuneesti");
+            return new JsonResult("aktiviteetti poistettu onnistuneesti");
         }
 
         //Komento jolla poistetaan tägi samalla kun tehtävä poistuu
@@ -453,6 +462,243 @@ namespace ReactWithASP.Server.Controllers
 
         }
 
+        //Tehtävän tiedon muokkaus
+        [HttpPut]
+        [Route("EditTask")]
+        public JsonResult EditTask( int Id, string Name, string? Description,  DateTime StartDate, DateTime EndDate, string TagName, string TagTheme, string StatusName, string StatusTheme, string ActivityTypeName)
+        {
+            DataTable table = new DataTable();
+            string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
+            SqlDataReader myReader;
+            using (SqlConnection myCon = new SqlConnection(sqlDatasource))
+            {
+                myCon.Open();
+                //Hankitaan tehtävän avulla näille arvot jotta ne voidaan myös muokata
+                int TagId;
+                int StatusId;
+                int ActivityTypeId;
+
+                string getIdsQuery = "SELECT TagId, StatusId, ActivityTypeId FROM Task WHERE Id = @Id";
+                using (SqlCommand MyCommand = new SqlCommand(getIdsQuery, myCon))
+                {
+                    MyCommand.Parameters.AddWithValue("@Id", Id);
+
+                    using (SqlDataReader reader = MyCommand.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            TagId = reader.GetInt32(0);
+                            StatusId = reader.GetInt32(1);
+                            ActivityTypeId = reader.GetInt32(2);
+                        }
+                        else
+                        {
+                            // Task not found
+                            return new JsonResult("Tehtävää ei löytynyt");
+                        }
+                    }
+                }
+
+
+                // Muokataan myös tagi ja status, jotka ovat yhteydessä tehtävään
+                EditTag(TagId, TagName, TagTheme);
+
+                EditStatus(StatusId, StatusName, StatusTheme);
+
+                EditActivityType(ActivityTypeId, ActivityTypeName);
+
+
+
+
+                //Sitten kun tehtävä löytyy voimme muokata sitä
+                string updateQuery = "UPDATE Task SET Name = @Name, Description = @Description, StartDate = @StartDate, EndDate = @EndDate, TagId = @TagId, StatusId = @StatusId, ActivityTypeId = @ActivityTypeId WHERE Id = @Id";
+
+                using (SqlCommand MyCommand = new SqlCommand(updateQuery, myCon))
+                {
+                    MyCommand.Parameters.AddWithValue("@Id", Id);
+                    MyCommand.Parameters.AddWithValue("@Name", Name);
+                    MyCommand.Parameters.AddWithValue("@Description", Description ?? DBNull.Value.ToString());
+                    MyCommand.Parameters.AddWithValue("@StartDate", StartDate);
+                    MyCommand.Parameters.AddWithValue("@EndDate", EndDate);
+                    MyCommand.Parameters.AddWithValue("@TagId", TagId);
+                    MyCommand.Parameters.AddWithValue("@StatusId", StatusId);
+                    MyCommand.Parameters.AddWithValue("@ActivityTypeId", ActivityTypeId);
+
+                    int rowsAffected = MyCommand.ExecuteNonQuery();
+                   
+                    if (rowsAffected > 0)
+                    {
+                        return new JsonResult("Task updated successfully");
+                        
+                    }
+                    else
+                    {
+                        return new JsonResult("Task not found or no changes made");
+                    }
+
+        
+                }
+               
+
+            }
+        }
+
+        //Tehtävän tiedon muokkaus
+        [HttpPut]
+        [Route("EditActivity")]
+        public JsonResult EditActivity(int Id, string Name, string? Description,string? Url, DateTime StartDate, DateTime EndDate, string TagName, string TagTheme, string StatusName, string StatusTheme, string ActivityTypeName)
+        {
+            DataTable table = new DataTable();
+            string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
+            SqlDataReader myReader;
+            using (SqlConnection myCon = new SqlConnection(sqlDatasource))
+            {
+                myCon.Open();
+                //Hankitaan tehtävän avulla näille arvot jotta ne voidaan myös muokata
+                int TagId;
+                int StatusId;
+                int ActivityTypeId;
+
+                string getIdsQuery = "SELECT TagId, StatusId, ActivityTypeId FROM Activity WHERE Id = @Id";
+                using (SqlCommand MyCommand = new SqlCommand(getIdsQuery, myCon))
+                {
+                    MyCommand.Parameters.AddWithValue("@Id", Id);
+
+                    using (SqlDataReader reader = MyCommand.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            TagId = reader.GetInt32(0);
+                            StatusId = reader.GetInt32(1);
+                            ActivityTypeId = reader.GetInt32(2);
+                        }
+                        else
+                        {
+                            return new JsonResult("Aktiviteettiä ei löytynyt");
+                        }
+                    }
+                }
+
+
+                // Muokataan myös tagi, status ja akTyyppi, jotka ovat yhteydessä tehtävään
+                EditTag(TagId, TagName, TagTheme);
+
+                EditStatus(StatusId, StatusName, StatusTheme);
+
+                EditActivityType(ActivityTypeId, ActivityTypeName);
+
+
+
+                //Sitten kun tehtävä löytyy voimme muokata sitä
+                string updateQuery = "UPDATE Activity SET Name = @Name, Description = @Description,Url = @Url, StartDate = @StartDate, EndDate = @EndDate, TagId = @TagId, StatusId = @StatusId, ActivityTypeId = @ActivityTypeId WHERE Id = @Id";
+
+                using (SqlCommand MyCommand = new SqlCommand(updateQuery, myCon))
+                {
+                    MyCommand.Parameters.AddWithValue("@Id", Id);
+                    MyCommand.Parameters.AddWithValue("@Name", Name);
+                    MyCommand.Parameters.AddWithValue("@Description", Description ?? DBNull.Value.ToString());
+                    MyCommand.Parameters.AddWithValue("@Url", Url ?? DBNull.Value.ToString());
+                    MyCommand.Parameters.AddWithValue("@StartDate", StartDate);
+                    MyCommand.Parameters.AddWithValue("@EndDate", EndDate);
+                    MyCommand.Parameters.AddWithValue("@TagId", TagId);
+                    MyCommand.Parameters.AddWithValue("@StatusId", StatusId);
+                    MyCommand.Parameters.AddWithValue("@ActivityTypeId", ActivityTypeId);
+
+                    int rowsAffected = MyCommand.ExecuteNonQuery();
+
+                    if (rowsAffected > 0)
+                    {
+                        return new JsonResult("Aktiviteetin päivitys onnistui");
+
+                    }
+                    else
+                    {
+                        return new JsonResult("Aktiviteettia ei löytynyt tai muutoksia ei tehty");
+                    }
+
+
+                }
+
+
+            }
+        }
+
+
+        private void EditTag(int Id, string TagName, string TagTheme)
+        {
+
+            string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
+
+            using (SqlConnection myCon = new SqlConnection(sqlDatasource))
+            {
+                myCon.Open();
+                string updateQuery = "UPDATE Tag SET Name = @NewTagName, Theme = @NewTagTheme WHERE Id = @Id";
+                using (SqlCommand myCommand = new SqlCommand(updateQuery, myCon))
+                {
+                    myCommand.Parameters.AddWithValue("@Id", Id);
+                    myCommand.Parameters.AddWithValue("@NewTagName", TagName);
+                    myCommand.Parameters.AddWithValue("@NewTagTheme", TagTheme);
+                    
+                    myCommand.ExecuteNonQuery();
+        
+                   
+                  
+                }
+            }
+           
+
+        }
+
+        private void EditStatus(int Id, string StatusName, string StatusTheme)
+        {
+
+            string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
+
+            using (SqlConnection myCon = new SqlConnection(sqlDatasource))
+            {
+                myCon.Open();
+                string updateQuery = "UPDATE Status SET Name = @NewStatusName, Theme = @NewStatusTheme WHERE Id = @Id";
+                using (SqlCommand myCommand = new SqlCommand(updateQuery, myCon))
+                {
+                    myCommand.Parameters.AddWithValue("@Id", Id);
+                    myCommand.Parameters.AddWithValue("@NewStatusName", StatusName);
+                    myCommand.Parameters.AddWithValue("@NewStatusTheme", StatusTheme);
+                    myCommand.ExecuteNonQuery();
+                  
+                    
+               
+                }
+            }
+
+        }
+
+        private void EditActivityType(int Id, string ActivityTypeName)
+        {
+
+            string sqlDatasource = _configuration.GetConnectionString("taskDBCon");
+
+            using (SqlConnection myCon = new SqlConnection(sqlDatasource))
+            {
+                myCon.Open();
+                string updateQuery = "UPDATE ActivityType SET Name = @TypeName WHERE Id = @Id";
+                using (SqlCommand myCommand = new SqlCommand(updateQuery, myCon))
+                {
+                    myCommand.Parameters.AddWithValue("@Id", Id);
+                    myCommand.Parameters.AddWithValue("@TypeName", ActivityTypeName);
+                    
+
+                    myCommand.ExecuteNonQuery();
+
+
+
+                }
+            }
+
+
+        }
+
+
 
     }
+
 }
